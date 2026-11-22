@@ -10,6 +10,7 @@ public static class UIShapes
     const int Size = 128;
     static Sprite triangle;
     static Sprite cross;
+    static Sprite arrow;
 
     public static Sprite Triangle()
     {
@@ -21,6 +22,13 @@ public static class UIShapes
     {
         if (cross == null) cross = Make(InCross);
         return cross;
+    }
+
+    // Стрелка остриём вправо (+X): повернуть Z, чтобы показать куда нужно.
+    public static Sprite Arrow()
+    {
+        if (arrow == null) arrow = Make(InArrow);
+        return arrow;
     }
 
     // Кнопка-значок по центру родителя со смещением pos. Anchor - центр родителя.
@@ -45,6 +53,14 @@ public static class UIShapes
         // Вершины (0.2, 0.1), (0.2, 0.9), (0.9, 0.5): остриё вправо.
         if (u < 0.2f || u > 0.9f) return false;
         return Mathf.Abs(v - 0.5f) <= 0.4f * (0.9f - u) / 0.7f;
+    }
+
+    static bool InArrow(float u, float v)
+    {
+        // Древко (0.04..0.62 по X, толщина 0.14) и наконечник-треугольник (0.55..0.97).
+        if (u >= 0.04f && u <= 0.62f && Mathf.Abs(v - 0.5f) <= 0.07f) return true;
+        if (u < 0.55f || u > 0.97f) return false;
+        return Mathf.Abs(v - 0.5f) <= 0.3f * (0.97f - u) / 0.42f;
     }
 
     static bool InCross(float u, float v)

@@ -450,6 +450,7 @@ MonoBehaviour:
   slideTurnSpeed: 12
   slidePushMultiplier: 1.25
   maxSlideSpeed: 20
+  maxTotalSpeedFactor: 1.25
   levelBoundsMin: {x: -14.7, y: -3.3}
   levelBoundsMax: {x: 4.8, y: 10.3}
   maxDepenetrationSpeed: 6
@@ -506,7 +507,6 @@ MonoBehaviour:
   positionStuckAbandonTime: 1
   throwCooldown: 1.5
   arrowPrefab: {fileID: 8821118874478467385, guid: c30a01782140fee4493e086bd9f39bc8, type: 3}
-  arrowSpeed: 20
   arrowRadius: 0.02
   throwClearanceMargin: 0.05
   faceRotationSpeed: 720
@@ -558,6 +558,7 @@ MonoBehaviour:
   ring: 2
   startDormant: 0
   activationRadius: 3
+  triggerOnly: 0
 --- !u!114 &2970215262338129802
 MonoBehaviour:
   m_ObjectHideFlags: 0

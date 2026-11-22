@@ -12,21 +12,26 @@ public class TestScript : MonoBehaviour
     public float aimActivateThreshold = 0.15f;
     public float aimReleaseThreshold = 0.05f;
     public float holdDistance = 0.55f;
-    public float aimTimeScale = 0.1f;
-
-    [Tooltip("How long bullet-time holds at full aimTimeScale after aiming starts, in real (unscaled) seconds - not scaled game time, since the whole point is a fixed real-world duration regardless of how slow time itself currently is.")]
-    public float aimSlowDuration = 1f;
-
-    [Tooltip("How long it takes to ramp back up to normal speed once aimSlowDuration elapses, in real (unscaled) seconds. Runs on a fixed schedule from when aiming started - it recovers on time even if the player keeps holding aim well past aimSlowDuration + aimRecoverDuration.")]
-    public float aimRecoverDuration = 1f;
+    // Замедление при прицеливании и радиус поимки ножа задаются сложностью (DifficultySettings), а не полями здесь.
+    float aimTimeScale => Difficulty.Current.aimTimeScale;
+    float aimSlowDuration => Difficulty.Current.aimSlowDuration;
+    float aimRecoverDuration => Difficulty.Current.aimRecoverDuration;
+    float catchZoneRadius => Difficulty.Current.catchRadius;
 
     public GameObject aimingVignette;
     public float vignetteFadeDuration = 0.15f;
     public Button catchButton;
-    public float catchRadius = 1f;
-
     // Игрок сейчас целится и держит клинок - в это время парирование недоступно.
     public bool IsAiming => heldKnife != null;
+
+    // 0..1: насколько отведён стик прицела от центра (камера отдаляется по этому значению); 0, если не целимся.
+    public float AimDeflection { get; private set; }
+    // 1..0: сколько осталось «сосредоточения» (замедления времени) с начала прицеливания; 1, когда не целимся.
+    public float FocusFraction { get; private set; } = 1f;
+    // ЭКСПЕРИМЕНТ «режим обзора»: палец вышел за круг стика, время стоит, камера смещается на LookOffset (мировые юниты).
+    public bool IsLooking { get; private set; }
+    public Vector2 LookOffset { get; private set; }
+    private bool lookFroze; // время остановлено режимом обзора (нужно вернуть после)
 
     private const float NormalFixedDeltaTime = 0.02f;
 
@@ -41,6 +46,11 @@ public class TestScript : MonoBehaviour
     private bool knifeWasFlying;
     private float cooldownRemaining;
     private float aimSlowTimer;
+    // Сессия концентрации: начинается при первом отведении стика и длится, пока палец лежит на стике (даже если стик
+    // вернули в центр). Замедление заново запускается только после того, как палец был убран и стик потянули снова.
+    private bool concentrationSession;
+    private float lastCatchableTime = -999f;
+    private AimStickHold aimHold;
     private bool vignetteFadeOutStarted;
     private bool aimFacingActive;
     private float aimFacingAngle;
@@ -48,19 +58,36 @@ public class TestScript : MonoBehaviour
     // Куда игрок смотрел по ходу движения в последний раз: после броска он разворачивается обратно туда
     // (на телефоне взгляд всегда совпадает с направлением движения, кроме момента прицеливания).
     private float moveFacingAngle;
+    private bool mouseSeen;
+    private bool mouseMoved;
+    private Vector2 mouseStartPos;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         moveFacingAngle = rb.rotation;
         if (aimingVignette != null) aimingVignetteFader = aimingVignette.GetComponent<FadeImage>();
-        if (catchButton != null) catchButton.onClick.AddListener(TryCatchKnife);
+        if (catchButton != null)
+        {
+            catchButton.onClick.AddListener(TryCatchKnife);
+            // Ловим в момент касания, а не отпускания пальца: на тапе нож успевает улететь (повторный вызов безвреден).
+            var trigger = catchButton.GetComponent<UnityEngine.EventSystems.EventTrigger>();
+            if (trigger == null) trigger = catchButton.gameObject.AddComponent<UnityEngine.EventSystems.EventTrigger>();
+            var down = new UnityEngine.EventSystems.EventTrigger.Entry { eventID = UnityEngine.EventSystems.EventTriggerType.PointerDown };
+            down.callback.AddListener(_ => TryCatchKnife());
+            trigger.triggers.Add(down);
+        }
+        if (aimJoystick != null)
+        {
+            aimHold = aimJoystick.GetComponent<AimStickHold>();
+            if (aimHold == null) aimHold = aimJoystick.gameObject.AddComponent<AimStickHold>();
+        }
     }
 
     void Update()
     {
         // Пока идёт мини-игра парирования, время стоит и игрок ничего не делает.
-        if (ParrySystem.Active || PlayerHealth.IsDead || LevelManager.Finished) return;
+        if (ParrySystem.Active || PlayerHealth.IsDead || LevelManager.Finished || TutorialLevel1.FreezeInput) return;
 
         UpdateKnifeCooldown();
         aimFacingActive = false;
@@ -78,8 +105,10 @@ public class TestScript : MonoBehaviour
         }
         else if (wasAimFacing)
         {
-            // Прицеливание закончилось (бросок или отпустили): разворачиваем обратно по направлению движения.
-            // Если левый джойстик зажат, поворот и так уже по ходу; если нет - возвращаем последнее направление.
+            // Прицеливание закончилось (бросок или отпустили): герой остаётся смотреть туда, куда целился, и
+            // это становится его «последним взглядом» - дальше его меняет только ходьба или новый прицел.
+            // Если левый джойстик зажат, поворот по ходу применяется уже в следующем кадре.
+            moveFacingAngle = aimFacingAngle;
             rb.rotation = moveFacingAngle;
         }
         wasAimFacing = aimFacingActive;
@@ -87,6 +116,20 @@ public class TestScript : MonoBehaviour
 
     void UpdateMovementAndFacing()
     {
+        // Обучение: пока учат бросать нож, ходить нельзя.
+        if (TutorialLevel1.LockMove)
+        {
+            rb.linearVelocity = Vector2.zero;
+            return;
+        }
+
+        // Две логики взгляда:
+        //  - мышь (ПК и редактор): герой всегда смотрит на курсор, что бы он ни делал (ходит стиком/клавишами или стоит);
+        //  - телефон (мыши нет или ей не пользуются): герой смотрит по ходу движения, а отпущенный стик/прицел
+        //    оставляет его в последнем направлении.
+        Mouse mouse = Mouse.current;
+        bool mouseLook = MouseInUse(mouse) && Camera.main != null;
+
         Vector2 joystickDir = moveJoystick != null ? moveJoystick.Direction : Vector2.zero;
         bool useJoystick = joystickDir.sqrMagnitude > 0.01f;
 
@@ -95,24 +138,24 @@ public class TestScript : MonoBehaviour
             rb.linearVelocity = joystickDir * moveSpeed;
             // Перед спрайта теперь смотрит в мировой +Y при повороте 0.
             float angle = Mathf.Atan2(joystickDir.y, joystickDir.x) * Mathf.Rad2Deg - 90f;
-            rb.rotation = angle;
             moveFacingAngle = angle;
-            return;
+            if (!mouseLook) rb.rotation = angle;
         }
-
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard != null)
+        else
         {
-            Vector2 move = Vector2.zero;
-            if (keyboard.leftArrowKey.isPressed) move.x -= 1f;
-            if (keyboard.rightArrowKey.isPressed) move.x += 1f;
-            if (keyboard.upArrowKey.isPressed) move.y += 1f;
-            if (keyboard.downArrowKey.isPressed) move.y -= 1f;
-            rb.linearVelocity = move.normalized * moveSpeed;
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard != null)
+            {
+                Vector2 move = Vector2.zero;
+                if (keyboard.leftArrowKey.isPressed) move.x -= 1f;
+                if (keyboard.rightArrowKey.isPressed) move.x += 1f;
+                if (keyboard.upArrowKey.isPressed) move.y += 1f;
+                if (keyboard.downArrowKey.isPressed) move.y -= 1f;
+                rb.linearVelocity = move.normalized * moveSpeed;
+            }
         }
 
-        Mouse mouse = Mouse.current;
-        if (mouse != null && Camera.main != null)
+        if (mouseLook)
         {
             Vector3 screenPos = mouse.position.ReadValue();
             screenPos.z = -Camera.main.transform.position.z;
@@ -123,8 +166,21 @@ public class TestScript : MonoBehaviour
                 // поворачиваем спрайт на 90 градусов, так как математически 90 - это направление вверх.
                 float angle = Mathf.Atan2(lookDir.y, lookDir.x) * Mathf.Rad2Deg - 90f;
                 rb.rotation = angle;
+                moveFacingAngle = angle;
             }
         }
+    }
+
+    // Мышью «пользуются», как только курсор сдвинулся с места после старта уровня. Так на ПК и в редакторе
+    // герой сразу смотрит за мышью, а на телефоне (нет мыши) и в Unity Remote (мышь стоит) работает телефонная
+    // логика. На мобильных платформах мышь не учитывается вообще.
+    bool MouseInUse(Mouse mouse)
+    {
+        if (mouse == null || Application.isMobilePlatform) return false;
+        Vector2 pos = mouse.position.ReadValue();
+        if (!mouseSeen) { mouseSeen = true; mouseStartPos = pos; }
+        else if (!mouseMoved && (pos - mouseStartPos).sqrMagnitude > 4f) mouseMoved = true;
+        return mouseMoved;
     }
 
     void HandleAim()
@@ -146,19 +202,47 @@ public class TestScript : MonoBehaviour
         float magnitude = dir.magnitude;
         bool active = aimWasActive ? magnitude > aimReleaseThreshold : magnitude > aimActivateThreshold;
 
+        // Палец убран со стика - сессия концентрации закончена, следующее отведение запустит её заново.
+        if (aimHold == null || !aimHold.Held) concentrationSession = false;
+
         // Одновременно существует только один нож - это один и тот же зачарованный клинок,
         // возвращающийся обратно, а не стопка метательных. Полностью игнорируем ввод прицеливания,
         // пока летящий нож не исчезнет. Сравнение с null работает, хотя сама ссылка не обнуляется:
         // Unity перегружает ==, так что уничтоженный объект сравнивается как равный null.
         if (flyingKnife != null || cooldownRemaining > 0f) active = false;
 
+        // Режим обзора (эксперимент): отдельный стик с глазиком (LookStick), от прицеливания не зависит.
+        var lookStick = LookStick.Instance;
+        IsLooking = lookStick != null && lookStick.Held;
+        if (IsLooking)
+        {
+            Vector2 lookDir = lookStick.Value;
+            if (Camera.main != null) lookDir = RotateVector(lookDir, Camera.main.transform.eulerAngles.z);
+            LookOffset = lookDir * Difficulty.Current.aimLookPanRadius;
+        }
+        else LookOffset = Vector2.zero;
+
+        // Для камеры (отдаление по отклонению стика) и шкалы сосредоточения.
+        AimDeflection = active ? Mathf.Clamp01((magnitude - aimActivateThreshold) / Mathf.Max(0.01f, 1f - aimActivateThreshold)) : 0f;
+
         if (active)
         {
             if (!aimWasActive)
             {
-                aimSlowTimer = 0f;
-                vignetteFadeOutStarted = false;
-                if (aimingVignetteFader != null) aimingVignetteFader.FadeIn(vignetteFadeDuration);
+                if (!concentrationSession)
+                {
+                    // Новая сессия (палец только что лёг на стик): концентрация начинается с нуля.
+                    aimSlowTimer = 0f;
+                    concentrationSession = true;
+                    vignetteFadeOutStarted = false;
+                    if (aimingVignetteFader != null) aimingVignetteFader.FadeIn(vignetteFadeDuration);
+                }
+                else if (aimSlowTimer < aimSlowDuration)
+                {
+                    // Стик вернули в центр и потянули снова, не убирая палец: расписание продолжается, а не запускается заново.
+                    vignetteFadeOutStarted = false;
+                    if (aimingVignetteFader != null) aimingVignetteFader.FadeIn(vignetteFadeDuration);
+                }
             }
 
             // Замедление при прицеливании («bullet-time»): замедляет физику/анимацию (всё, что
@@ -170,7 +254,8 @@ public class TestScript : MonoBehaviour
             // скорость, даже если игрок всё ещё целится. Именно Time.unscaledDeltaTime, потому что
             // эта длительность должна означать одинаковое реальное время независимо от того,
             // какой timeScale действует в данный момент.
-            aimSlowTimer += Time.unscaledDeltaTime;
+            if (!IsLooking) aimSlowTimer += Time.unscaledDeltaTime; // в режиме обзора время и концентрация стоят
+            // Остаток сосредоточения: от 1 в начале прицела до 0, когда время снова идёт в обычном ритме.
             float targetTimeScale;
             if (aimSlowTimer < aimSlowDuration)
             {
@@ -196,8 +281,9 @@ public class TestScript : MonoBehaviour
             }
             // Множитель скорости игры (кнопки 0.5/0.75/1) действует поверх замедления прицеливания.
             targetTimeScale *= GameSpeed.Multiplier;
+            if (IsLooking) targetTimeScale = 0f; // режим обзора: время полностью стоит
             Time.timeScale = targetTimeScale;
-            Time.fixedDeltaTime = NormalFixedDeltaTime * targetTimeScale;
+            Time.fixedDeltaTime = NormalFixedDeltaTime * Mathf.Max(targetTimeScale, 0.01f);
 
             if (heldKnife == null)
             {
@@ -220,6 +306,7 @@ public class TestScript : MonoBehaviour
                 aimFacingAngle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f;
             }
             heldKnifeScript.SetAimDirection(dir);
+            if (IsLooking) heldKnifeScript.HideTrajectory(); // режим обзора: траектории нет
         }
         else if (aimWasActive)
         {
@@ -229,7 +316,11 @@ public class TestScript : MonoBehaviour
             // рано, ещё внутри aimSlowDuration) - как только оно идёт или завершено, виньетка уже
             // гаснет/исчезла, и FadeOut попытался бы запустить StartCoroutine на GameObject,
             // который сам FadeOut мог только что деактивировать.
-            if (aimingVignetteFader != null && !vignetteFadeOutStarted) aimingVignetteFader.FadeOut(vignetteFadeDuration);
+            if (aimingVignetteFader != null && !vignetteFadeOutStarted)
+            {
+                aimingVignetteFader.FadeOut(vignetteFadeDuration);
+                vignetteFadeOutStarted = true; // виньетка уже гаснет: повторный FadeOut на неактивном объекте даёт ошибку
+            }
 
             if (heldKnife != null)
             {
@@ -247,6 +338,33 @@ public class TestScript : MonoBehaviour
                     Destroy(heldKnife);
                 }
                 heldKnife = null;
+            }
+        }
+
+        // Пока палец на стике, концентрация тикает и когда стик в центре (иначе можно «сбрасывать» её возвратом в центр).
+        if (!active && concentrationSession) aimSlowTimer += Time.unscaledDeltaTime;
+        FocusFraction = concentrationSession
+            ? Mathf.Clamp01(1f - aimSlowTimer / Mathf.Max(0.01f, aimSlowDuration + aimRecoverDuration))
+            : 1f;
+
+        // Режим обзора вне прицеливания: время стоит, пока палец на стике с глазиком, потом возвращается.
+        // Когда цель прицеливания активна, время ведёт ветка выше.
+        if (IsLooking)
+        {
+            if (!active && !ParrySystem.Active && !PlayerHealth.IsDead && !StartFreeze.Waiting && !PauseMenu.Paused)
+            {
+                Time.timeScale = 0f;
+                lookFroze = true;
+            }
+            else if (active) lookFroze = true;
+        }
+        else if (lookFroze)
+        {
+            lookFroze = false;
+            if (!active && !ParrySystem.Active && !PlayerHealth.IsDead && !StartFreeze.Waiting && !PauseMenu.Paused)
+            {
+                Time.timeScale = GameSpeed.Multiplier;
+                Time.fixedDeltaTime = NormalFixedDeltaTime * GameSpeed.Multiplier;
             }
         }
 
@@ -289,10 +407,21 @@ public class TestScript : MonoBehaviour
         catchButton.interactable = IsKnifeCatchable();
     }
 
-    bool IsKnifeCatchable()
+    // Нож сейчас в радиусе поимки (после отскока).
+    bool KnifeInCatchRange()
     {
         return flyingKnife != null && flyingKnifeScript.HasBounced
-            && Vector2.Distance(rb.position, flyingKnifeScript.Position) <= catchRadius;
+            && Vector2.Distance(rb.position, flyingKnifeScript.Position) <= catchZoneRadius;
+    }
+
+    // Можно ловить: нож в радиусе ИЛИ был в радиусе только что (окно прощения Difficulty.catchGraceTime). Нож летит
+    // 18-25 юн/с и за время тапа по кнопке (~0.1 с) успевает выйти из радиуса, поэтому строгая проверка в момент
+    // нажатия отказывала при активной кнопке. Окно считается в реальном времени, а не в замедленном.
+    bool IsKnifeCatchable()
+    {
+        if (flyingKnife == null || !flyingKnifeScript.HasBounced) return false;
+        if (KnifeInCatchRange()) { lastCatchableTime = Time.unscaledTime; return true; }
+        return Time.unscaledTime - lastCatchableTime <= Difficulty.Current.catchGraceTime;
     }
 
     public void TryCatchKnife()

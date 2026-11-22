@@ -28,24 +28,21 @@ public class ParrySystem : MonoBehaviour
     public Transform player;
 
     [Header("Правила")]
-    [Tooltip("Ширина конуса перед игроком, внутри которого враг считается «на которого игрок смотрит».")]
-    public float coneAngle = 120f;
+    // Ширина конуса перед игроком, внутри которого враг считается «на которого игрок смотрит», задаётся сложностью.
+    float coneAngle => Difficulty.Current.parryConeAngle;
 
     [Tooltip("Тап для парирования засчитывается от любого пальца (в том числе второго, пока первый держит джойстик). Выключено - как раньше: только первый палец / мышь.")]
     public bool tapAnyFinger = true;
-    [Tooltip("Сколько секунд занимает один проход шарика по дуге.")]
-    public float passDuration = 0.5f;
-    [Tooltip("Сколько проходов делает шарик (туда, обратно, опять туда = 3).")]
-    public int passes = 3;
+    // Параметры мини-игры задаются сложностью (DifficultySettings), см. Difficulty.Current.
+    float passDuration => Difficulty.Current.parryPassDuration;
+    int passes => Difficulty.Current.parryPasses;
     [Tooltip("Зелёный квадратик каждый раз встаёт в случайное место дуги в этих пределах (0 = левый конец, 1 = правый).")]
     [Range(0f, 1f)] public float targetMin = 0.2f;
     [Range(0f, 1f)] public float targetMax = 0.85f;
-    [Tooltip("Во сколько раз быстрее бежит шарик за КАЖДОГО дополнительного мечника, ударившего в ту же итерацию (множится: 2 мечника x1.5, 3 мечника x2.25).")]
-    public float speedPerExtraAttacker = 1.5f;
-    [Tooltip("Половина ширины окна парирования в долях дуги: шарик в пределах положения квадратика ± это значение - успех. Размер квадратика подгоняется под него.")]
-    public float targetHalfWidth = 0.06f;
-    [Tooltip("Кулдаун парирования после мини-игры, в секундах (реального времени).")]
-    public float cooldown = 5f;
+    float speedPerExtraAttacker => Difficulty.Current.parrySpeedPerExtraAttacker;
+    float targetHalfWidth => Difficulty.Current.parryTargetHalfWidth;
+    float edgeTolerance => Difficulty.Current.parryEdgeTolerance;
+    float cooldown => Difficulty.Current.parryCooldown;
     [Tooltip("Сколько секунд показывается результат (заливка квадратика) перед возвратом времени.")]
     public float resultHoldTime = 0.35f;
 
@@ -55,7 +52,7 @@ public class ParrySystem : MonoBehaviour
     [Tooltip("Спрайт виньетки. Если не задан, берётся спрайт виньетки прицеливания у TestScript.")]
     public Sprite vignetteSprite;
     [Tooltip("Значок готовности парирования: положение относительно правого верхнего угла и размер.")]
-    public Vector2 iconPosition = new Vector2(-110f, -110f);
+    public Vector2 iconPosition = new Vector2(-170f, -110f); // левее кнопки паузы (правый верхний угол)
     public float iconSize = 110f;
     public Color cooldownColor = new Color(1f, 0.85f, 0.1f, 1f);
     public Vector2 panelPosition = new Vector2(0f, -130f);
@@ -64,7 +61,20 @@ public class ParrySystem : MonoBehaviour
     public Color aimingColor = new Color(0.25f, 0.55f, 1f, 1f);
     public Color greenColor = new Color(0.3f, 1f, 0f, 1f);
 
+    [Header("Обучение (мини-игра в паузе)")]
+    [Tooltip("Насколько заранее залит зелёным квадратик в обучении (в реальной игре заливка появляется только при успехе).")]
+    [Range(0f, 1f)] public float tutorialFillAlpha = 0.18f;
+    [Tooltip("Сколько секунд линия дуги остаётся красной после промаха в обучении, затем она за missFlashFade плавно белеет.")]
+    public float missFlashHold = 0.3f;
+    public float missFlashFade = 0.2f;
+    public Color missColor = new Color(1f, 0.15f, 0.15f, 1f);
+
     private bool active;
+    // Режим обучения: мини-игра идёт сама по себе, повторяется до удачного тапа и не трогает ни время, ни кулдаун.
+    private bool tutorialMode;
+    private Action tutorialDone;
+    private readonly List<UnityEngine.UI.Image> lineImages = new List<UnityEngine.UI.Image>();
+    private float flashTimer = -1f;
     private float elapsed; // «время шарика»: растёт быстрее реального, если бьют несколько мечников
     private float currentTargetT = 0.75f;
     private float arcLength;
@@ -155,6 +165,7 @@ public class ParrySystem : MonoBehaviour
 
         if (!active && cooldownRemaining > 0f) cooldownRemaining = Mathf.Max(0f, cooldownRemaining - Time.unscaledDeltaTime);
         UpdateReadyIcon();
+        UpdateMissFlash();
 
         if (!active) return;
 
@@ -173,7 +184,18 @@ public class ParrySystem : MonoBehaviour
         // Тап в том же кадре, где началась мини-игра, не считается - это не реакция игрока.
         bool tapped = Time.frameCount != beginFrame && (tapQueued || (tapAnyFinger && AnyTouchBegan()) || (Pointer.current != null && Pointer.current.press.wasPressedThisFrame));
         tapQueued = false;
-        if (tapped) Resolve(Mathf.Abs(t - currentTargetT) <= targetHalfWidth);
+        if (tutorialMode)
+        {
+            // Обучение: промах (тап мимо или шарик пробежал все проходы) - красная вспышка и шарик заново.
+            if (tapped)
+            {
+                if (Mathf.Abs(t - currentTargetT) <= targetHalfWidth + edgeTolerance) Resolve(true);
+                else TutorialMiss();
+            }
+            else if (elapsed >= total) TutorialMiss();
+            return;
+        }
+        if (tapped) Resolve(Mathf.Abs(t - currentTargetT) <= targetHalfWidth + edgeTolerance);
         else if (elapsed >= total) Resolve(false);
     }
 
@@ -217,7 +239,12 @@ public class ParrySystem : MonoBehaviour
     {
         int pass = Mathf.Min((int)(time / passDuration), passes - 1);
         float frac = Mathf.Clamp01((time - pass * passDuration) / passDuration);
-        return pass % 2 == 0 ? frac : 1f - frac;
+        // Скорость шарика: медленнее в центре, быстрее у краёв (parryCenterSlowdown). u in [-1,1] - положение
+        // при равномерном движении; u*(1-k) + u^3*k даёт скорость (1-k) в центре и (1+2k) у края, длительность прохода та же.
+        float k = Difficulty.Current.parryCenterSlowdown;
+        float u = 2f * frac - 1f;
+        float eased = ((u * (1f - k) + u * u * u * k) + 1f) * 0.5f;
+        return pass % 2 == 0 ? eased : 1f - eased;
     }
 
     void Resolve(bool parried)
@@ -228,8 +255,56 @@ public class ParrySystem : MonoBehaviour
         if (parried) squareFill.color = new Color(greenColor.r, greenColor.g, greenColor.b, 0.5f);
     }
 
+    // Мини-игра для обучения: идёт в паузе (время держит обучение), зелёный квадратик чуть залит заранее,
+    // повторяется до попадания. onSuccess вызывается после показа успеха. Кулдаун не включается.
+    public void BeginTutorial(Action onSuccess)
+    {
+        tutorialMode = true;
+        tutorialDone = onSuccess;
+        active = true;
+        resolved = false;
+        elapsed = 0f;
+        speedMultiplier = 1f;
+        beginFrame = Time.frameCount;
+        callbacks.Clear();
+        PlaceTarget(UnityEngine.Random.Range(Mathf.Min(targetMin, targetMax), Mathf.Max(targetMin, targetMax)));
+        squareFill.color = new Color(greenColor.r, greenColor.g, greenColor.b, tutorialFillAlpha);
+        panel.gameObject.SetActive(true);
+        UpdateBall(0f);
+    }
+
+    void TutorialMiss()
+    {
+        flashTimer = 0f;
+        elapsed = 0f;
+        UpdateBall(0f);
+    }
+
+    // Белая линия краснеет на missFlashHold секунд и за missFlashFade плавно возвращается к белому.
+    void UpdateMissFlash()
+    {
+        if (flashTimer < 0f) return;
+        flashTimer += Time.unscaledDeltaTime;
+        Color c;
+        if (flashTimer < missFlashHold) c = missColor;
+        else if (flashTimer < missFlashHold + missFlashFade) c = Color.Lerp(missColor, lineColor, (flashTimer - missFlashHold) / Mathf.Max(missFlashFade, 0.0001f));
+        else { c = lineColor; flashTimer = -1f; }
+        foreach (var im in lineImages) im.color = c;
+    }
+
     void Finish()
     {
+        if (tutorialMode)
+        {
+            active = false;
+            tutorialMode = false;
+            panel.gameObject.SetActive(false);
+            var done = tutorialDone;
+            tutorialDone = null;
+            done?.Invoke();
+            return;
+        }
+
         active = false;
         panel.gameObject.SetActive(false);
         // Возвращаем то же замедление, что было, но с учётом множителя скорости, если его сменили во время мини-игры.
@@ -253,6 +328,12 @@ public class ParrySystem : MonoBehaviour
     void PlaceTarget(float t)
     {
         currentTargetT = t;
+        // Размер зелёной цели из сложности: ширина вдоль дуги = окно парирования, высота - своя (0 = квадрат).
+        // Считается при каждой постановке, чтобы правки в DifficultySettings действовали сразу.
+        float width = Mathf.Max(8f, 2f * targetHalfWidth * arcLength);
+        float heightFraction = Difficulty.Current.parryTargetHeight;
+        float height = heightFraction > 0f ? Mathf.Max(8f, heightFraction * arcLength) : width;
+        square.sizeDelta = new Vector2(width, height);
         Vector2 tangent = (Bezier(Mathf.Min(1f, t + 0.01f)) - Bezier(Mathf.Max(0f, t - 0.01f))).normalized;
         square.anchoredPosition = Bezier(t);
         square.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(tangent.y, tangent.x) * Mathf.Rad2Deg);
@@ -353,6 +434,7 @@ public class ParrySystem : MonoBehaviour
     {
         var im = NewImage("Seg", panel, null);
         im.color = color;
+        lineImages.Add(im);
         RectTransform rt = im.rectTransform;
         Vector2 d = b - a;
         rt.sizeDelta = new Vector2(d.magnitude + extraLength, thickness);

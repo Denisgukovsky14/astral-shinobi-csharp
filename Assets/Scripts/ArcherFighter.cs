@@ -50,8 +50,8 @@ public class ArcherFighter : MonoBehaviour
     public float throwCooldown = 1.5f;
     public GameObject arrowPrefab;
 
-    [Tooltip("Twice the kunai fighter's own throw speed (10) - arrows fly fast, per spec.")]
-    public float arrowSpeed = 20f;
+    // Скорость стрелы задаётся сложностью (DifficultySettings.enemyArrowSpeed).
+    float arrowSpeed => Difficulty.Current.enemyArrowSpeed;
 
     [Tooltip("Matches Arrow.prefab's ObstacleSensor child collider - a thin, dedicated hitbox used only against Obstacles, kept separate from the thicker collider used against the Player. A zero-width line can mathematically slip past a corner the real arrow still clips; this models that real (intentionally thin) obstacle collision instead of guessing.")]
     public float arrowRadius = 0.02f;

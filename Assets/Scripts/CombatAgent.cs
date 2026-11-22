@@ -37,6 +37,15 @@ public class CombatAgent : MonoBehaviour
     public bool startDormant;
     [Tooltip("Радиус активации дремлющего: боец группы, добежавший до него на это расстояние, окликает его и тот просыпается. Игрок, подошедший ближе этого расстояния, тоже будит его.")]
     public float activationRadius = 3f;
+    [Tooltip("Спит до явного сигнала (EnemyWakeTrigger.Wake): не просыпается от близости игрока и его не окликает боец группы. Включать вместе с Start Dormant.")]
+    public bool triggerOnly;
+
+    // Разбудить спящего: воюет сам, вне лимита группы (как после подхода игрока).
+    public void Wake()
+    {
+        provoked = true;
+        beingCalled = false;
+    }
 
     // Оклик: боец группы, которого послали будить дремлющего (callTarget), и время начала поручения.
     // Пока он бежит, его обычное поведение (позиция на кольце, атаки) выключено.
@@ -112,8 +121,27 @@ public class CombatAgent : MonoBehaviour
         Ai.destination = callTarget.transform.position;
     }
 
+    private HealthBar healthBar;
+    private bool speedScaled;
+
+    // Скорость врага по сложности: множитель из DifficultySettings применяется один раз, когда враг появился на уровне.
+    void Start()
+    {
+        if (speedScaled || Ai == null) return;
+        speedScaled = true;
+        Ai.maxSpeed *= Difficulty.Current.enemySpeedMultiplier;
+    }
+
+    // Дремлющий враг, получивший урон (нож, отскок и т.п.), просыпается сразу, даже если он triggerOnly.
+    void Update()
+    {
+        if (startDormant && !IsActive && healthBar != null && healthBar.currentHealth < healthBar.maxHealth)
+            Wake();
+    }
+
     void Awake()
     {
+        healthBar = GetComponentInChildren<HealthBar>(true);
         Ai = GetComponent<AIPath>();
         setter = GetComponent<AIDestinationSetter>();
         antiTricker = GetComponent<AntiTricker>();

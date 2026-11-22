@@ -56,7 +56,8 @@ public class KunaiFighter : MonoBehaviour
 
     public float throwCooldown = 1.5f;
     public GameObject kunaiPrefab;
-    public float kunaiSpeed = 10f;
+    // Скорость куная задаётся сложностью (DifficultySettings.enemyKunaiSpeed).
+    float kunaiSpeed => Difficulty.Current.enemyKunaiSpeed;
 
     [Tooltip("Matches Kunai.prefab's ObstacleSensor child collider - a thin, dedicated hitbox used only against Obstacles, kept separate from the thicker collider used against the Player. A zero-width line can mathematically slip past a corner the real kunai still clips; this models that real (now intentionally thin) obstacle collision instead of guessing.")]
     public float kunaiRadius = 0.02f;

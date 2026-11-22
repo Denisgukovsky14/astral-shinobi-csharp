@@ -38,6 +38,9 @@ public class EnemyChaseStop : MonoBehaviour
     [Tooltip("Hard cap (units/sec) on the slide push's actual speed, applied AFTER slidePushMultiplier. The push scales with the agent's current ai.maxSpeed, which briefly spikes several times higher during an AntiTricker dash - uncapped, a dash that gets stuck against an obstacle can slide at 100+ units/sec for as long as contact lasts, which is what flung the enemy off the level once. This caps it back to roughly the original, pre-dash-speed-increases feel regardless of how high any dash boosts maxSpeed. (In practice this whole slide/depenetration path is now skipped entirely while AntiTricker is countering - kept as a safety margin for normal, non-dash contact.)")]
     public float maxSlideSpeed = 20f;
 
+    [Tooltip("Потолок реальной скорости врага при скольжении вдоль препятствия, в долях от maxSpeed: скольжение не разгоняет врага выше maxSpeed * это число. 1 = скольжение не добавляет скорости сверх хода AIPath, когда он и так идёт на полной.")]
+    public float maxTotalSpeedFactor = 1.25f;
+
     [Tooltip("Bottom-left and top-right corners of the playable area, with a small margin inside the boundary walls. Whatever fires this fast-moving Kinematic enemy into a wall/player collision hard enough to launch it - the exact physics mechanism has been elusive to pin down precisely, tried multiple targeted fixes already - this is a blunt, unconditional last resort: if the enemy is ever found outside this box, snap it straight back inside, every single frame, regardless of cause.")]
     public Vector2 levelBoundsMin = new Vector2(-14.7f, -3.3f);
     public Vector2 levelBoundsMax = new Vector2(4.8f, 10.3f);
@@ -361,6 +364,11 @@ public class EnemyChaseStop : MonoBehaviour
                     ? Vector3.RotateTowards(slideDir, rawTangent, slideTurnSpeed * Time.deltaTime, 10f).normalized
                     : rawTangent;
                 float pushSpeed = Mathf.Min(ai.maxSpeed * slidePushMultiplier, maxSlideSpeed);
+                // Общий потолок: скольжение добавляется к собственному движению AIPath, и при касании стены/двери/
+                // колонны враг летел в 3+ раза быстрее maxSpeed (измерено: 13-15 юн/с при 4.25), что выглядело как
+                // телепорт при обходе препятствий. Добавка не может поднять реальную скорость выше maxSpeed * factor;
+                // если враг упёрся и почти стоит (velocity ~0), на скольжение остаётся почти полный запас.
+                pushSpeed = Mathf.Min(pushSpeed, Mathf.Max(0f, ai.maxSpeed * maxTotalSpeedFactor - ai.velocity.magnitude));
                 ai.Move(slideDir * pushSpeed * Time.deltaTime);
             }
 

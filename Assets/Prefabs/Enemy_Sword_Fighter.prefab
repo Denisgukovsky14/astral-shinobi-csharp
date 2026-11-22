@@ -49,7 +49,7 @@ MonoBehaviour:
   width: 0.5
   height: 0.08
   backgroundColor: {r: 0, g: 0, b: 0, a: 1}
-  fillColor: {r: 0.13351846, g: 1, b: 0, a: 1}
+  fillColor: {r: 1, g: 0, b: 0, a: 1}
   worldOffset: {x: 0, y: 0.35, z: 0}
   sortingOrder: 10
   visibleDuration: 2
@@ -256,6 +256,7 @@ MonoBehaviour:
   slideTurnSpeed: 12
   slidePushMultiplier: 2.5
   maxSlideSpeed: 20
+  maxTotalSpeedFactor: 1.25
   levelBoundsMin: {x: -14.7, y: -3.3}
   levelBoundsMax: {x: 4.8, y: 10.3}
   maxDepenetrationSpeed: 6
@@ -367,6 +368,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CombatAgent
   ring: 0
+  startDormant: 0
+  activationRadius: 3
+  triggerOnly: 0
 --- !u!114 &2785743985109548680
 MonoBehaviour:
   m_ObjectHideFlags: 0

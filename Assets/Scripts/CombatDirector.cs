@@ -264,7 +264,7 @@ public class CombatDirector : MonoBehaviour
     void UpdateGroup(float now)
     {
         foreach (var a in CombatAgent.All)
-            if (a != null && !a.provoked && !a.IsActive && Vector2.Distance(a.transform.position, player.position) < a.activationRadius)
+            if (a != null && !a.triggerOnly && !a.provoked && !a.IsActive && Vector2.Distance(a.transform.position, player.position) < a.activationRadius)
             {
                 a.provoked = true;
                 a.beingCalled = false;
@@ -350,7 +350,7 @@ public class CombatDirector : MonoBehaviour
             int pr = CallPriority(c);
             foreach (var d in CombatAgent.All)
             {
-                if (d == null || d.InGroup || d.IsActive || d.beingCalled) continue;
+                if (d == null || d.InGroup || d.IsActive || d.beingCalled || d.triggerOnly) continue;
                 float dist = Vector2.Distance(c.transform.position, d.transform.position);
                 if (pr < bestPriority || (pr == bestPriority && dist < bestDist))
                 {

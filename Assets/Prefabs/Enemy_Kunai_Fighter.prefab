@@ -358,6 +358,7 @@ MonoBehaviour:
   slideTurnSpeed: 12
   slidePushMultiplier: 1.25
   maxSlideSpeed: 20
+  maxTotalSpeedFactor: 1.25
   levelBoundsMin: {x: -14.7, y: -3.3}
   levelBoundsMax: {x: 4.8, y: 10.3}
   maxDepenetrationSpeed: 6
@@ -397,7 +398,6 @@ MonoBehaviour:
   positionStuckAbandonTime: 1
   throwCooldown: 1.5
   kunaiPrefab: {fileID: 8821118874478467385, guid: 68d5360de4f7029419006ec29f4f8415, type: 3}
-  kunaiSpeed: 10
   kunaiRadius: 0.02
   kunaiLength: 0.58
   cornerLeniencyFraction: 0.6
@@ -436,6 +436,7 @@ MonoBehaviour:
   ring: 1
   startDormant: 0
   activationRadius: 3
+  triggerOnly: 0
 --- !u!114 &4836429920190610928
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -33,7 +33,7 @@
 
 - Unity **6000.2.6f2**, URP, **New Input System**, TextMeshPro, Joystick Pack (два экранных джойстика: движение/бросок).
 - **A\* Pathfinding Project (Free)**: `GridGraph` (узел 0.08, диаметр коллизии 8 узлов), `AIPath`, `Seeker`, `AIDestinationSetter`.
-- Слои: `Obstacles` (стены, колонны, дверь), `Player`. Стены уровня — один `CompositeCollider2D` из боксов (~0.19 толщиной).
+- Слои: `Obstacles` (стены, колонны, дверь), `Player`. `Decor` (15) — вазы и прочий декор: блокирует Player/Enemy, снаряды и нож пролетают; A*-маска графа должна включать этот слой. Стены уровня — один `CompositeCollider2D` из боксов (~0.19 толщиной).
 - Масштаб: камера ortho 5 (10 юнитов по высоте), персонаж ≈1 юнит, колонна ≈1.2. Не менять без крайней нужды: на нём
   завязаны радиусы, скорости, сетка A\*.
 - Сцены: `Level_Template` (шаблон для новых уровней), `Coordination_Testing_Scene` (рабочая песочница: мечник, лучник,
@@ -61,7 +61,7 @@
   отступ без токена). Явные хэнд-оффы: `IsWindingUp`, `IsCountering`, `IsWithdrawing`, `IsCalling`, `IsReserve`. Не ставить
   `canMove = true` насильно.
 - `Time.timeScale` пишут `TestScript` (замедление при прицеливании), `ParrySystem` (0), `StartFreeze` (0 до первого действия),
-  `PlayerHealth` (0 при смерти), `DeathScreen`, `GameSpeed.Set` (кнопки 0.5/0.75/1). Все домножают на `GameSpeed.Multiplier`;
+  `PlayerHealth` (0 при смерти), `DeathScreen`, `GameSpeed.Set` (кнопки 0.5/0.75/1), `TutorialLevel1` (пауза обучения на первом уровне, `StartFreeze` там выключен). Все домножают на `GameSpeed.Multiplier`;
   новый код проверяет `ParrySystem.Active` / `PlayerHealth.IsDead` / `StartFreeze.Waiting`.
 - Цель `AIDestinationSetter` у мечника: игрок (есть токен), точка ожидания/флангового слота, либо дремлющий (гонец).
 
@@ -97,7 +97,7 @@
   ломается). Всегда `assert count == 1` перед заменой.
 - Поля инстансов префабов в сцене: `PrefabUtility.RecordPrefabInstancePropertyModifications` + `MarkSceneDirty` + `SaveOpenScenes`;
   значения префаба — `LoadPrefabContents`/`SaveAsPrefabAsset`. `GameObject.Find` не видит неактивные объекты.
-- **Граф A\* в редакторе:** после правки `GridGraph` — `d.SetData(d.SerializeGraphs())` (один `SerializeGraphs()` не сохраняет);
+- **Граф A\* в редакторе:** после правки `GridGraph` — `d.SetData(d.SerializeGraphs())` (**перед этим всегда `d.DeserializeGraphs()`**: после `OpenScene` из скрипта граф ещё не загружен, и `SerializeGraphs()` запишет пустоту — так я однажды стёр графы на всех уровнях; восстановление: взять байты из `Level_Template`, `SetData` + `DeserializeGraphs` + `LevelTools.FitLevel`, потом вернуть `PlayerInjector.levelBounds*`) (один `SerializeGraphs()` не сохраняет);
   копия сцены наследует старую сетку; для новых уровней — меню «Подогнать уровень» (`LevelTools.FitLevel`). `Collider2D.bounds`
   вне Play бывают пустыми — считать по геометрии.
 - **Рецепт симуляции** (чтобы тест был чистым): `StartFreeze` выключить, `Time.timeScale = 1`, `TestScript` выключить (иначе

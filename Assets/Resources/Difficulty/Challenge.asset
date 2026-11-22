@@ -1,0 +1,54 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af54fac123c55524cafb584f76799e0d, type: 3}
+  m_Name: Challenge
+  m_EditorClassIdentifier: Assembly-CSharp::DifficultySettings
+  enemySpeedMultiplier: 1
+  hitStunDuration: 0
+  hitStunSpeedFactor: 0.2
+  enemyKunaiSpeed: 17
+  enemyArrowSpeed: 20
+  knifeSpeedMultiplier: 1
+  knifeScaleMultiplier: 1
+  knifeEnemyHitPadding: 0
+  knifeMaxBounces: 3
+  allowAnyThrowAngle: 0
+  knifeDamageByBounces:
+  - 20
+  - 40
+  - 60
+  - 80
+  trajectoryLegAlphas:
+  - 0.5
+  - 0.5
+  knifeDeflectsEnemyProjectiles: 0
+  blockFlushThrows: 0
+  flushConeHalfAngle: 15
+  oneShotAfterAllBounces: 0
+  catchRadius: 1.4
+  catchGraceTime: 0.4
+  parryConeAngle: 100
+  parryPassDuration: 0.5
+  parryCenterSlowdown: 0
+  parryPasses: 3
+  parryTargetHalfWidth: 0.06
+  parryTargetHeight: 0
+  parryEdgeTolerance: 0
+  parryCooldown: 5
+  parrySpeedPerExtraAttacker: 1.5
+  aimTimeScale: 0.1
+  aimSlowDuration: 2
+  cameraSize: 5
+  aimLookEnabled: 0
+  aimLookPanRadius: 3
+  aimUnzoomMax: 1
+  aimRecoverDuration: 1
